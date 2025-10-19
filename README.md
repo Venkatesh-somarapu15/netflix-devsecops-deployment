@@ -56,68 +56,94 @@ Use the code below for the Jenkins pipeline.
 ```bash
 pipeline {
     agent any
+
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
+        PATH = "/usr/local/bin:/usr/bin:/bin:$PATH"  // include docker & trivy
     }
+
     stages {
-        stage('clean workspace') {
+        stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
+
         stage('Checkout from Git') {
             steps {
-                git branch: 'main', url: 'https://github.com/gauri17-pro/nextflix.git'
+                git branch: 'main', url: 'https://github.com/Venkatesh-somarapu15/nextflix.git'
             }
         }
-        stage("Sonarqube Analysis") {
+
+        stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Netflix \
-                    -Dsonar.projectKey=Netflix'''
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=Netflix \
+                        -Dsonar.projectKey=Netflix
+                    '''
                 }
             }
         }
-        stage('OWASP FS SCAN') {
+
+        stage('OWASP FS Scan') {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'OWASP DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-        stage('TRIVY FS SCAN') {
+
+        stage('Trivy FS Scan') {
             steps {
                 script {
                     try {
-                        sh "trivy fs . > trivyfs.txt" 
-                    }catch(Exception e){
-                        input(message: "Are you sure to proceed?", ok: "Proceed")
+                        // correct path for trivy
+                        sh '/usr/local/bin/trivy fs . > trivyfs.txt'
+                    } catch (Exception e) {
+                        input(message: "Trivy FS scan failed. Proceed anyway?", ok: "Proceed")
                     }
                 }
             }
         }
-        stage("Docker Build Image"){
-            steps{
-                   
-                sh "docker build --build-arg API_KEY=2af0904de8242d48e8527eeedc3e19d9 -t netflix ."
+
+        stage('Docker Build Image') {
+            steps {
+                sh '''
+                    docker build --build-arg API_KEY=d8fffee4caeab3144a416fd93fc4388b \
+                    -t netflix .
+                '''
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image netflix > trivyimage.txt"
-                script{
-                    input(message: "Are you sure to proceed?", ok: "Proceed")
-                }
-            }
-        }
-        stage("Docker Push"){
-            steps{
+
+        stage('Trivy Image Scan') {
+            steps {
                 script {
-                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker'){   
-                    sh "docker tag netflix gauris17/netflix:latest "
-                    sh "docker push gauris17/netflix:latest"
+                    // correct path for trivy
+                    sh '/usr/local/bin/trivy image netflix > trivyimage.txt'
+                    input(message: "Trivy Image scan completed. Proceed to push?", ok: "Proceed")
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh '''
+                            docker tag netflix venkatesh502/netflix:latest
+                            docker push venkatesh502/netflix:latest
+                        '''
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline completed. Cleaning workspace...'
+            cleanWs()
         }
     }
 }
